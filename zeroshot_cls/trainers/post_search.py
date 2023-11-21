@@ -120,7 +120,7 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
 
     print("obtain vision proxy without Sinkhorn distance")
     import pdb; pdb.set_trace() 
-    tau_t = 0.01
+    tau_t = 1
     plabel = F.softmax(logits / tau_t, dim=1)
     # use plabel 
     lr = 10
@@ -133,7 +133,6 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
     acc, _ = accuracy(logits, labels, topk=(1, 5))
     acc = (acc / image_feat.shape[0]) * 100
     print(f"=> Before using vision proxy, zero-shot accuracy: {acc:.2f}")
-
 
 @torch.no_grad()
 def search_prompt_zs(cfg, vweights, image_feature=None, searched_prompt=None, prompt_lib=None):
