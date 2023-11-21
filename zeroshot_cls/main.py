@@ -10,7 +10,7 @@ import datasets.modelnet40
 from trainers import best_param
 
 from trainers import zeroshot
-from trainers.post_search import search_weights_zs, search_prompt_zs
+from trainers.post_search import search_weights_zs, search_prompt_zs, vision_proxy_zs
 
 def print_args(args, cfg):
     print('***************')
@@ -104,7 +104,11 @@ def main(args):
     prompts = best_param.best_prompt_weight['{}_{}_test_prompts'.format(cfg.DATASET.NAME.lower(), cfg.MODEL.BACKBONE.NAME2)]
     if args.post_search:
         if args.zero_shot:
-            prompts, image_feature = search_prompt_zs(cfg, vweights, searched_prompt=prompts)
+            vision_proxy = True 
+            if vision_proxy:
+                vision_proxy_zs(cfg, vweights, searched_prompt=prompts)
+            else:
+                prompts, image_feature = search_prompt_zs(cfg, vweights, searched_prompt=prompts)
             #vweights = search_weights_zs(cfg, prompts, vweights, image_feature)
             return
             

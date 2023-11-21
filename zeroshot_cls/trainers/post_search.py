@@ -3,6 +3,7 @@ import clip
 import torch
 import os.path as osp
 import scipy.io as sio
+import torch.nn.functional as F
 
 class_names = {
     'ModelNet40': ['airplane', 'bathtub', 'bed', 'bench', 'bookshelf', 'bottle', 'bowl', 'car', 'chair', 'cone', 'cup', 'curtain', 'desk', 'door', 'dresser', 'flower_pot', 'glass_box', 'guitar', 'keyboard', 'lamp', 'laptop', 'mantel', 'monitor', 'night_stand', 'person', 'piano', 'plant', 'radio', 'range_hood', 'sink', 'sofa', 'stairs', 'stool', 'table', 'tent', 'toilet', 'tv_stand', 'vase', 'wardrobe', 'xbox'],
@@ -62,15 +63,77 @@ def read_prompts(cfg, dataset='modelnet40'):
     txt_feat = sio.loadmat('prompts/{}_{}_text_feat_lib.mat'.format(dataset, cfg.MODEL.BACKBONE.NAME2))
     return data, txt_feat
 
+###################### ref: https://github.com/idstcv/InMaP
+def image_opt(feat, init_classifier, plabel, lr=10, iter=2000, tau_i=0.04, alpha=0.6):
+    ins, dim = feat.shape
+    val, idx = torch.max(plabel, dim=1)
+    mask = val > alpha
+    plabel[mask, :] = 0
+    plabel[mask, idx[mask]] = 1
+    base = feat.T @ plabel
+    classifier = init_classifier.clone()
+    pre_norm = float('inf')
+    for i in range(0, iter):
+        prob = F.softmax(feat @ classifier / tau_i, dim=1)
+        grad = feat.T @ prob - base
+        temp = torch.norm(grad)
+        if temp > pre_norm:
+            lr /= 2.
+        pre_norm = temp
+        classifier -= (lr / (ins * tau_i)) * grad
+        classifier = F.normalize(classifier, dim=0)
+    return classifier
 
 @torch.no_grad()
 def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, prompt_lib=None):
     """Perfom vision proxy 
     Returns:
     """
-    print("\n***** Vision Proxy *****")
-    # obtrain pseudo-label based on text prompt 
+    import pdb; pdb.set_trace() 
+    print("\n***** obtrain text proxy *****")
+    labels = torch.load(osp.join(cfg.OUTPUT_DIR, "labels.pt"))
+
+    clip_model, _ = clip.load(cfg.MODEL.BACKBONE.NAME)
+    clip_model.eval()
+    all_classes = class_names[cfg.DATASET.NAME]
+    text_feat = textual_encoder(cfg, clip_model, searched_prompt=searched_prompt)
+    text_feat = text_feat / text_feat.norm(dim=-1, keepdim=True)  
     
+    # Encoding all  generated prompt.
+    file = 'prompts/{}_{}_text_feat_lib.mat'.format(cfg.DATASET.NAME.lower(), cfg.MODEL.BACKBONE.NAME2)
+    if not osp.exists(file):
+        encode_prompt_lib(clip_model, cfg, dataset=cfg.DATASET.NAME.lower())
+    
+    if image_feature is None:
+        image_feat = torch.load(osp.join(cfg.OUTPUT_DIR, "features.pt"))
+    else:
+        image_feat = image_feature
+    view_weights = torch.tensor(vweights).cuda()
+    image_feat_w = image_feat.reshape(-1, cfg.MODEL.PROJECT.NUM_VIEWS, cfg.MODEL.BACKBONE.CHANNEL) * view_weights.reshape(1, -1, 1)
+    image_feat_w = image_feat_w.reshape(-1, cfg.MODEL.PROJECT.NUM_VIEWS * cfg.MODEL.BACKBONE.CHANNEL).type(clip_model.dtype)
+    
+    # Before search
+    logits = clip_model.logit_scale.exp() * image_feat_w @ text_feat.t() * 1.0
+    acc, _ = accuracy(logits, labels, topk=(1, 5))
+    acc = (acc / image_feat.shape[0]) * 100
+    print(f"=> accuracy with image proxy, zero-shot accuracy: {acc:.2f}")
+
+    print("obtain vision proxy without Sinkhorn distance")
+    import pdb; pdb.set_trace() 
+    tau_t = 0.01
+    plabel = F.softmax(logits / tau_t, dim=1)
+    # use plabel 
+    lr = 10
+    iters_proxy = 2000
+    tau_i = 0.04 
+    alpha = 0.6
+    image_classifier = image_opt(image_feat, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
+    logits_i = image_feat @ image_classifier
+    
+    acc, _ = accuracy(logits, labels, topk=(1, 5))
+    acc = (acc / image_feat.shape[0]) * 100
+    print(f"=> Before using vision proxy, zero-shot accuracy: {acc:.2f}")
+
 
 @torch.no_grad()
 def search_prompt_zs(cfg, vweights, image_feature=None, searched_prompt=None, prompt_lib=None):

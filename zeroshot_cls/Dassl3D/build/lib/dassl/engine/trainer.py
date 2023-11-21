@@ -1,4 +1,5 @@
 import time
+import tqdm 
 import numpy as np
 import os.path as osp
 import os
@@ -376,7 +377,7 @@ class SimpleTrainer(TrainerBase):
             print('Do evaluation on test set')
         start = time.time()
 
-        for batch_idx, batch in enumerate(data_loader):
+        for batch_idx, batch in enumerate(tqdm.tqdm(data_loader)):
             input, label = self.parse_batch_test(batch)
 
             output = self.model_inference(input, label)
