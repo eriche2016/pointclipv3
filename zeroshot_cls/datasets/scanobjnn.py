@@ -10,7 +10,6 @@ from dassl.data.datasets import DATASET_REGISTRY, Datum, DatasetBase
 class ScanObjectNN(DatasetBase):
 
     def __init__(self, cfg):
-        
         self.dataset_dir = cfg.DATASET.ROOT
 
         text_file = os.path.join(self.dataset_dir, 'shape_names.txt')
@@ -30,7 +29,8 @@ class ScanObjectNN(DatasetBase):
         all_label = []
         with open(data_path, "r") as f:
             for h5_name in f.readlines():
-                f = h5py.File(h5_name.strip(), 'r')
+                file_path = os.path.join(os.path.dirname(data_path), h5_name.strip())
+                f = h5py.File(file_path, 'r')
                 data = f['data'][:].astype('float32')
                 label = f['label'][:].astype('int64')
                 f.close()

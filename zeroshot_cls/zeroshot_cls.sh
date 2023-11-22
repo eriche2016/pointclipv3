@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Path to dataset
-DATASET=modelnet40
-# DATASET=scanobjectnn
+# DATASET=modelnet40
+DATASET=scanobjectnn
 
 TRAINER=PointCLIPV2_ZS
 # Trainer configs: rn50, rn101, vit_b32 or vit_b16

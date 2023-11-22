@@ -84,6 +84,27 @@ def image_opt(feat, init_classifier, plabel, lr=10, iter=2000, tau_i=0.04, alpha
         classifier = F.normalize(classifier, dim=0)
     return classifier
 
+def sinkhorn(plabel, gamma=0, iter=20):
+    row, col = plabel.shape
+    P = plabel
+    P /= row
+    if gamma > 0:
+        q = torch.sum(P, dim=0, keepdim=True)
+        q = q**gamma
+        q /= torch.sum(q)
+    for it in range(0, iter):
+        # total weight per column must be 1/col or q_j
+        P /= torch.sum(P, dim=0, keepdim=True)
+        if gamma > 0:
+            P *= q
+        else:
+            P /= col
+        # total weight per row must be 1/row
+        P /= torch.sum(P, dim=1, keepdim=True)
+        P /= row
+    P *= row  # keep each row sum to 1 as the pseudo label
+    return P
+
 @torch.no_grad()
 def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, prompt_lib=None):
     """Perfom vision proxy 
@@ -113,27 +134,44 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
     image_feat_w = image_feat_w.reshape(-1, cfg.MODEL.PROJECT.NUM_VIEWS * cfg.MODEL.BACKBONE.CHANNEL).type(clip_model.dtype)
     
     # Before search
-    logits = clip_model.logit_scale.exp() * image_feat_w @ text_feat.t() * 1.0
-    acc, _ = accuracy(logits, labels, topk=(1, 5))
+    logits_t = clip_model.logit_scale.exp() * image_feat_w @ text_feat.t() * 1.0
+    acc, _ = accuracy(logits_t, labels, topk=(1, 5))
     acc = (acc / image_feat.shape[0]) * 100
-    print(f"=> accuracy with image proxy, zero-shot accuracy: {acc:.2f}")
+    print(f"=> accuracy with text proxy, zero-shot accuracy: {acc:.2f}")
 
+    # the label refinment process with sinkhorn distance doesnot bring further improvmenets
     print("obtain vision proxy without Sinkhorn distance")
-    import pdb; pdb.set_trace() 
     tau_t = 1
-    plabel = F.softmax(logits / tau_t, dim=1)
+    plabel = F.softmax(logits_t / tau_t, dim=1)
     # use plabel 
+    tau_t = 0.01 
     lr = 10
     iters_proxy = 2000
-    tau_i = 0.04 
-    alpha = 0.6
-    image_classifier = image_opt(image_feat, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
-    logits_i = image_feat @ image_classifier
+    tau_is = [0.01, 0.02, 0.03, 0.04] 
+    alphas = [0.3, 0.4, 0.5, 0.6, 0.7]
+    for tau_i in tau_is:
+        for alpha in alphas:
+            image_classifier = image_opt(image_feat_w, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
+            logits_i = clip_model.logit_scale.exp() * image_feat_w @ image_classifier
+            
+            acc, _ = accuracy(logits_i, labels, topk=(1, 5))
+            acc = (acc / image_feat.shape[0]) * 100
+            print(f"=> vision proxy with alpha = {alpha}, zero-shot accuracy: {acc:.2f}")
+        
+        """
+        print('obtain refined labels by Sinkhorn distance')
+        for alpha in alphas:
+            gamma = 0.0
+            iters_sinkhorn = 20
+            plabel = sinkhorn(plabel, gamma, iters_sinkhorn)
+            print('obtain vision proxy with Sinkhorn distance')
+            image_classifier = image_opt(image_feat_w, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
+            logits_i = clip_model.logit_scale.exp() * image_feat_w @ image_classifier
+            acc, _ = accuracy(logits_i, labels, topk=(1, 5))
+            acc = (acc / image_feat.shape[0]) * 100
+            print(f"accuracy with image proxy + sinkhorn (alpha={alpha}): {acc:.2f}")
+    """
     
-    acc, _ = accuracy(logits, labels, topk=(1, 5))
-    acc = (acc / image_feat.shape[0]) * 100
-    print(f"=> Before using vision proxy, zero-shot accuracy: {acc:.2f}")
-
 @torch.no_grad()
 def search_prompt_zs(cfg, vweights, image_feature=None, searched_prompt=None, prompt_lib=None):
     print("\n***** Searching for prompts *****")
