@@ -1,5 +1,4 @@
 *.pyc
-*.txt.gz
 *.egg*
 *.mat
 zeroshot_cls/output/*
