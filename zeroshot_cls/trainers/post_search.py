@@ -84,6 +84,29 @@ def image_opt(feat, init_classifier, plabel, lr=10, iter=2000, tau_i=0.04, alpha
         classifier = F.normalize(classifier, dim=0)
     return classifier
 
+def mv_image_opt(feat, init_classifier, plabel, num_view, lr=10, iter=2000, tau_i=0.04, alpha=0.6):
+    """ multi-view depth maps vison proxy distillation
+    """
+    ins, dim = feat.shape
+    # split features 
+    val, idx = torch.max(plabel, dim=1)
+    mask = val > alpha
+    plabel[mask, :] = 0
+    plabel[mask, idx[mask]] = 1
+    base = feat.T @ plabel
+    classifier = init_classifier.clone()
+    pre_norm = float('inf')
+    for i in range(0, iter):
+        prob = F.softmax(feat @ classifier / tau_i, dim=1)
+        grad = feat.T @ prob - base
+        temp = torch.norm(grad)
+        if temp > pre_norm:
+            lr /= 2.
+        pre_norm = temp
+        classifier -= (lr / (ins * tau_i)) * grad
+        classifier = F.normalize(classifier, dim=0)
+    return classifier
+
 def sinkhorn(plabel, gamma=0, iter=20):
     row, col = plabel.shape
     P = plabel
@@ -151,7 +174,13 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
     alphas = [0.3, 0.4, 0.5, 0.6, 0.7]
     for tau_i in tau_is:
         for alpha in alphas:
-            image_classifier = image_opt(image_feat_w, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
+            is_mv_distil = False 
+            if is_mv_distil:
+                image_classifier = mv_image_opt(image_feat_w, text_feat.t(), plabel, 
+                                                cfg.MODEL.PROJECT.NUM_VIEWSlr, iters_proxy, tau_i, alpha)
+            else:
+                image_classifier = image_opt(image_feat_w, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
+                          
             logits_i = clip_model.logit_scale.exp() * image_feat_w @ image_classifier
             
             acc, _ = accuracy(logits_i, labels, topk=(1, 5))
