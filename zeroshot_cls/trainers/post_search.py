@@ -88,18 +88,43 @@ def mv_image_opt(feat, init_classifier, plabel, num_view, lr=10, iter=2000, tau_
     """ multi-view depth maps vison proxy distillation
     image_feat: 
     init_classifier (from text proxy): 
+    1) hard label by contrastive learning?
     """
     import pdb; pdb.set_trace()
     ins, dim = feat.shape
+    feat_NMD = feat.view(ins, num_view, dim) # N x M x D
     # split features 
     val, idx = torch.max(plabel, dim=1)
     mask = val > alpha
     plabel[mask, :] = 0
     plabel[mask, idx[mask]] = 1
-    base = feat.T @ plabel
+    base = feat.T @ plabel # (NxD)^T, (N x C) -> D x C
     classifier = init_classifier.clone()
     # intermediate classifier 
-    
+    classifier_blocks = classifier.view(classifier.shape[0], num_view, dim) # C x M x D
+    ####################################################
+    # should we distill each view one by one?
+    ####################################################
+    mv_vision_prox = [] 
+    for k in range(num_view):
+        feat_k = feat_NMD[:, k, :]
+        base_k = feat_k.T @ plabel 
+        classifier_k = classifier_blocks[:, k, :].clone()
+        pre_norm = float('inf')
+        for i in range(0, iter):
+            prob = F.softmax(feat_k @ classifier_k / tau_i, dim=1)
+            grad = feat_k.T @ prob - base_k
+            temp = torch.norm(grad)
+            if temp > pre_norm:
+                lr /= 2.
+            pre_norm = temp
+            classifier_k -= (lr / (ins * tau_i)) * grad
+            classifier_k = F.normalize(classifier_k, dim=0)
+        mv_vision_prox.append(classifier_k)
+        classifier = torch.cat(mv_vision_prox, dim=1)
+        classifier = F.normalize(classifier, dim=0)
+
+    """
     pre_norm = float('inf')
     for i in range(0, iter):
         prob = F.softmax(feat @ classifier / tau_i, dim=1)
@@ -110,6 +135,7 @@ def mv_image_opt(feat, init_classifier, plabel, num_view, lr=10, iter=2000, tau_
         pre_norm = temp
         classifier -= (lr / (ins * tau_i)) * grad
         classifier = F.normalize(classifier, dim=0)
+    """
     return classifier
 
 def sinkhorn(plabel, gamma=0, iter=20):
