@@ -86,7 +86,10 @@ def image_opt(feat, init_classifier, plabel, lr=10, iter=2000, tau_i=0.04, alpha
 
 def mv_image_opt(feat, init_classifier, plabel, num_view, lr=10, iter=2000, tau_i=0.04, alpha=0.6):
     """ multi-view depth maps vison proxy distillation
+    image_feat: 
+    init_classifier (from text proxy): 
     """
+    import pdb; pdb.set_trace()
     ins, dim = feat.shape
     # split features 
     val, idx = torch.max(plabel, dim=1)
@@ -95,6 +98,8 @@ def mv_image_opt(feat, init_classifier, plabel, num_view, lr=10, iter=2000, tau_
     plabel[mask, idx[mask]] = 1
     base = feat.T @ plabel
     classifier = init_classifier.clone()
+    # intermediate classifier 
+    
     pre_norm = float('inf')
     for i in range(0, iter):
         prob = F.softmax(feat @ classifier / tau_i, dim=1)
@@ -134,7 +139,7 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
     Returns:
     """
     import pdb; pdb.set_trace() 
-    print("\n***** obtrain text proxy *****")
+    print("\n***** obtain text proxy *****")
     labels = torch.load(osp.join(cfg.OUTPUT_DIR, "labels.pt"))
 
     clip_model, _ = clip.load(cfg.MODEL.BACKBONE.NAME)
@@ -149,14 +154,17 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
         encode_prompt_lib(clip_model, cfg, dataset=cfg.DATASET.NAME.lower())
     
     if image_feature is None:
-        image_feat = torch.load(osp.join(cfg.OUTPUT_DIR, "features.pt"))
+        image_feat = torch.load(osp.join(cfg.OUTPUT_DIR, "features.pt")) # 2468 x 5120
     else:
         image_feat = image_feature
-    view_weights = torch.tensor(vweights).cuda()
+    view_weights = torch.tensor(vweights).cuda() # size: 10
+    # 2468 x 10 x 512
     image_feat_w = image_feat.reshape(-1, cfg.MODEL.PROJECT.NUM_VIEWS, cfg.MODEL.BACKBONE.CHANNEL) * view_weights.reshape(1, -1, 1)
+    # 2468 x 5120
     image_feat_w = image_feat_w.reshape(-1, cfg.MODEL.PROJECT.NUM_VIEWS * cfg.MODEL.BACKBONE.CHANNEL).type(clip_model.dtype)
     
     # Before search
+    # text_feat: 40 x 5120
     logits_t = clip_model.logit_scale.exp() * image_feat_w @ text_feat.t() * 1.0
     acc, _ = accuracy(logits_t, labels, topk=(1, 5))
     acc = (acc / image_feat.shape[0]) * 100
@@ -174,10 +182,10 @@ def vision_proxy_zs(cfg, vweights, image_feature=None, searched_prompt=None, pro
     alphas = [0.3, 0.4, 0.5, 0.6, 0.7]
     for tau_i in tau_is:
         for alpha in alphas:
-            is_mv_distil = False 
+            is_mv_distil = True 
             if is_mv_distil:
                 image_classifier = mv_image_opt(image_feat_w, text_feat.t(), plabel, 
-                                                cfg.MODEL.PROJECT.NUM_VIEWSlr, iters_proxy, tau_i, alpha)
+                                                cfg.MODEL.PROJECT.NUM_VIEWS, lr, iters_proxy, tau_i, alpha)
             else:
                 image_classifier = image_opt(image_feat_w, text_feat.t(), plabel, lr, iters_proxy, tau_i, alpha)
                           
